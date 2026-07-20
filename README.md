@@ -1,1 +1,1 @@
-﻿# RWTH---Geothermal-Piles-Project
+﻿# RWTH-Geothermal-Piles-Project

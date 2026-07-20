@@ -1,0 +1,40 @@
+# Physics-Informed Neural Networks for Geothermal Piles
+# Python 3.13 — versions verified against PyPI (2026-07-20)
+# All packages ship prebuilt wheels for cp313 macOS ARM64 (no compilation)
+
+# Core Deep Learning
+torch==2.13.0
+torchvision==0.28.0
+numpy==2.2.6
+scipy==1.16.3
+
+# Scientific Computing
+pandas==2.3.3
+scikit-learn==1.7.2
+matplotlib==3.10.9
+seaborn==0.13.2
+
+# PINN training framework
+pytorch-lightning==2.6.5
+
+# Development & Testing
+pytest==9.1.1
+pytest-cov==7.1.0
+black==26.5.1
+flake8==7.3.0
+pylint==4.0.6
+
+# Jupyter & Visualization
+jupyter==1.1.1
+jupyterlab==4.6.1
+ipython==9.15.0
+plotly==6.9.0
+
+# Documentation
+sphinx==9.1.0
+sphinx-rtd-theme==3.1.0
+
+# Utilities
+python-dotenv==1.2.2
+tqdm==4.69.0
+pyyaml==6.0.3

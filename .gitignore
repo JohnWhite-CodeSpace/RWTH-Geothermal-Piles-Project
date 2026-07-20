@@ -1,0 +1,98 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+.jupyterlab-settings/
+
+# Data & Models (IMPORTANT - customize as needed)
+data/raw/
+data/processed/
+models/saved/
+models/checkpoints/
+*.h5
+*.pkl
+*.pth
+*.pt
+*.ckpt
+results/output/
+results/plots/
+results/logs/
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+
+# Documentation
+docs/_build/
+site/
+
+# OS
+Thumbs.db
+.DS_Store
+*.tmp
+
+# Temporary files
+*.bak
+*.tmp
+*~
+
+# Datasets (if using large files)
+*.zip
+*.tar.gz
+*.rar
+
+# Large files (>100MB)
+*.mp4
+*.mov
+*.avi
+*.csv
+*.dat
+*.nc

@@ -45,8 +45,6 @@ venv.bak/
 .jupyterlab-settings/
 
 # Data & Models (IMPORTANT - customize as needed)
-data/raw/
-data/processed/
 models/saved/
 models/checkpoints/
 *.h5

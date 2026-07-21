@@ -16,12 +16,12 @@ Usage:
 import traceback
 from pathlib import Path
 from typing import Tuple
-
 import numpy as np
 import pandas as pd
-
+import config as cfg
 SECONDS_PER_DAY = 24.0 * 60.0 * 60.0
 
+PHYS_CONST = cfg.PhysicsConstants()
 
 def load_single_case(
     case_num: int,
@@ -97,14 +97,7 @@ def load_all_cases() -> dict[int, dict[str, pd.DataFrame]] | dict[str, str | int
         }
 
 
-def prepare_training_data(
-    case_num: int,
-    R_s: float = 30.0,
-    T_s: float = 12.0,
-    delta_T: float = 38.0,
-    t_c: float = 1e7,
-    u_c: float = 8e5,
-) -> Tuple[np.ndarray, np.ndarray] | dict[str, str | int]:
+def prepare_training_data(case_num: int) -> Tuple[np.ndarray, np.ndarray] | dict[str, str | int]:
     """
     Build a nondimensional (r*, t*) -> (T*, u*) dataset from FDM data.
 
@@ -155,10 +148,10 @@ def prepare_training_data(
 
         r_mesh, t_mesh = np.meshgrid(r, t_days, indexing="xy")
 
-        r_star = r_mesh / R_s
-        t_star = (t_mesh * SECONDS_PER_DAY) / t_c
-        T_star = (T - T_s) / delta_T
-        u_star = u / u_c
+        r_star = r_mesh / PHYS_CONST.R_s
+        t_star = (t_mesh * SECONDS_PER_DAY) / PHYS_CONST.t_c
+        T_star = (T - PHYS_CONST.T_s) / PHYS_CONST.delta_T
+        u_star = u / PHYS_CONST.u_c
 
         X = np.column_stack([r_star.ravel(), t_star.ravel()])
         y = np.column_stack([T_star.ravel(), u_star.ravel()])

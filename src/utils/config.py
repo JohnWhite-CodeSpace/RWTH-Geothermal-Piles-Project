@@ -12,6 +12,10 @@ class PhysicsConstants:
     def __init__(self):
         """Initialize soil and water physical properties."""
         self.n = 0.25  # Porosity
+        self.T_s = 12
+        self.T_f = 50
+        self.t_c = 1e7
+        self.u_c = 8e5
         self.beta_p = 3.00e-5  # Thermal expansion, soil particles (1/C)
         self.beta_w = 3.42e-4  # Thermal expansion, water (1/C)
         self.alpha_w = 5.00e-10  # Compressibility, water (1/Pa)

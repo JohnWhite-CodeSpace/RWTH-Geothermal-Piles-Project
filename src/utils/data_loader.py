@@ -1,175 +1,221 @@
 """
 Data loader for FDM reference solutions (case1-case5).
 
+Loads temperature and excess pore-water pressure fields produced by the
+Finite Difference Method (FDM) solver and prepares them as nondimensional
+(r*, t*) -> (T*, u*) pairs, using the same nondimensionalization as the
+PINN model: r* = r/R_s, t* = t/t_c, T* = (T - T_s)/delta_T, u* = u/u_c.
+
 Usage:
-    from example_data_loader import load_case, load_all_cases
-    
-    # Load single case
-    u, T, r, t = load_case(case_num=1)
-    
-    # Load all cases
-    all_data = load_all_cases()
+    from src.utils.data_loader import load_single_case, prepare_training_data
+
+    temp_df, pressure_df = load_single_case(case_num=1)
+    X, y = prepare_training_data(case_num=1)
 """
 
-import pandas as pd
-import numpy as np
+import traceback
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Tuple
+
+import numpy as np
+import pandas as pd
+
+SECONDS_PER_DAY = 24.0 * 60.0 * 60.0
 
 
-def load_case(case_num: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def load_single_case(
+    case_num: int,
+) -> tuple[pd.DataFrame, pd.DataFrame] | dict[str, str | int]:
     """
-    Load FDM reference data for a single case.
-    
-    Args:
-        case_num: Case number (1-5)
-    
-    Returns:
-        u: Excess pore pressure (n_space, n_time)
-        T: Temperature distribution (n_space, n_time)
-        r: Spatial coordinates (n_space,)
-        t: Time coordinates (n_time,)
+    Load temperature and excess pore pressure data for a selected case.
+
+    Parameters
+    ----------
+    case_num : int
+        Case number (1-5).
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        Temperature and pressure DataFrames.
+
+    dict
+        Error information if loading fails.
     """
-    case_dir = Path(f"data/raw/case{case_num}")
-    
-    if not case_dir.exists():
-        raise FileNotFoundError(f"Case directory not found: {case_dir}")
-    
-    # Load CSV files
-    pressure_file = case_dir / "excess_pore_pressure.csv"
-    temperature_file = case_dir / "temperature_distribution.csv"
-    
-    if not pressure_file.exists():
-        raise FileNotFoundError(f"Pressure file not found: {pressure_file}")
-    if not temperature_file.exists():
-        raise FileNotFoundError(f"Temperature file not found: {temperature_file}")
-    
-    # Read data
-    u_df = pd.read_csv(pressure_file)
-    T_df = pd.read_csv(temperature_file)
-    
-    # Extract values
-    u = u_df.values
-    T = T_df.values
-    
-    # Extract coordinates from column/row names
-    # Assumes: columns are time values, rows are spatial values (indexed 0...)
-    # Adjust based on your actual CSV structure!
-    
-    # If first column is 'r' coordinate:
-    if 'r' in u_df.columns:
-        r = u_df['r'].values
-        u = u_df.drop(columns=['r']).values
-        T = T_df.drop(columns=['r']).values if 'r' in T_df.columns else T_df.values
-    else:
-        # Generate spatial coordinates (assuming 0.5m to 30m, equally spaced)
-        n_space = u.shape[0]
-        r = np.linspace(0.5, 30, n_space)
-    
-    # If first row is time values:
-    if u.shape[1] > 0:
-        try:
-            t = np.array(u_df.columns[1:], dtype=float)  # Skip first column if it's 'r'
-        except:
-            # Generate time coordinates
-            n_time = u.shape[1]
-            t = np.linspace(0, 1e6, n_time)  # Adjust to your time range
-    else:
-        t = np.array([])
-    
-    return u, T, r, t
+    try:
+        if not isinstance(case_num, int):
+            raise TypeError("case_num must be an integer")
+        if not 1 <= case_num <= 5:
+            raise ValueError("case_num must be between 1 and 5")
+
+        root = Path(__file__).resolve().parent.parent.parent
+        temp_path = (
+            root / "data" / "raw" / f"case{case_num}" / "temperature_distribution.csv"
+        )
+        pressure_path = (
+            root / "data" / "raw" / f"case{case_num}" / "excess_pore_pressure.csv"
+        )
+
+        temp_df = pd.read_csv(temp_path, index_col=0)
+        pressure_df = pd.read_csv(pressure_path, index_col=0)
+        return temp_df, pressure_df
+
+    except Exception as ex:
+        return {
+            "return_code": -1,
+            "error_message": repr(ex),
+            "traceback": traceback.format_exc(),
+        }
 
 
-def load_all_cases() -> Dict:
+def load_all_cases() -> dict[int, dict[str, pd.DataFrame]] | dict[str, str | int]:
     """
-    Load all FDM reference cases (1-5).
-    
-    Returns:
-        Dictionary with keys 'case1'-'case5', each containing:
-        {'u': pressure, 'T': temperature, 'r': radius, 't': time}
+    Load temperature and excess pore pressure data for all available cases.
+
+    Returns
+    -------
+    dict
+        Dictionary containing data for cases 1-5.
+
+    dict
+        Error information if loading fails.
     """
-    all_data = {}
-    
-    for case_num in range(1, 6):
-        try:
-            u, T, r, t = load_case(case_num)
-            all_data[f'case{case_num}'] = {
-                'u': u,
-                'T': T,
-                'r': r,
-                't': t,
-                'k': [1e-8, 1e-9, 1e-10, 1e-11, 1e-12][case_num-1]  # Permeability
-            }
-            print(f"✓ case{case_num} loaded: u.shape={u.shape}, T.shape={T.shape}")
-        except Exception as e:
-            print(f"✗ case{case_num} failed: {e}")
-    
-    return all_data
+    try:
+        all_cases = {}
+        for i in range(1, 6):
+            result = load_single_case(i)
+            if isinstance(result, dict):
+                return result
+            temp_df, pressure_df = result
+            all_cases[i] = {"Temp_data": temp_df, "Pressure_data": pressure_df}
+        return all_cases
+    except Exception as ex:
+        return {
+            "return_code": -1,
+            "error_message": repr(ex),
+            "traceback": traceback.format_exc(),
+        }
 
 
-def prepare_training_data(case_num: int, normalize: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+def prepare_training_data(
+    case_num: int,
+    R_s: float = 30.0,
+    T_s: float = 12.0,
+    delta_T: float = 38.0,
+    t_c: float = 1e7,
+    u_c: float = 8e5,
+) -> Tuple[np.ndarray, np.ndarray] | dict[str, str | int]:
     """
-    Prepare training data from FDM reference solution.
-    
-    Creates dataset of (r, t) → (u, T) pairs for PINN training.
-    
-    Args:
-        case_num: Case number (1-5)
-        normalize: Whether to normalize to [0, 1]
-    
-    Returns:
-        X: Input coordinates (n_samples, 2) with columns [r, t]
-        y: Target values (n_samples, 2) with columns [u, T]
+    Build a nondimensional (r*, t*) -> (T*, u*) dataset from FDM data.
+
+    Applies the same nondimensionalization used by the PINN model
+    (r* = r/R_s, t* = t/t_c, T* = (T-T_s)/delta_T, u* = u/u_c), so the
+    returned arrays live in the same coordinate system as the network's
+    inputs/outputs. The defaults match the values used elsewhere in the
+    project; pass explicit values to stay in sync if those change, and
+    make sure t_c/u_c match whatever was used to compute C1/C2/C3 for
+    this case.
+
+    Parameters
+    ----------
+    case_num : int
+        Case number (1-5).
+    R_s : float
+        Far-field radius (m), used to nondimensionalize r.
+    T_s : float
+        Reference (far-field/initial) temperature (C).
+    delta_T : float
+        Tf - Ts (C), used to nondimensionalize T.
+    t_c : float
+        Characteristic time scale (s).
+    u_c : float
+        Characteristic pressure scale (Pa).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        X: (N, 2) array with columns [r*, t*].
+        y: (N, 2) array with columns [T*, u*], matching the output
+        order of `GeothermalPINN.net_u_forward` (T then u).
+
+    dict
+        Error information if loading fails.
     """
-    u, T, r, t = load_case(case_num)
-    
-    # Create meshgrid
-    r_mesh, t_mesh = np.meshgrid(r, t, indexing='ij')
-    
-    # Flatten to create training pairs
-    X = np.column_stack([r_mesh.flatten(), t_mesh.flatten()])
-    y = np.column_stack([u.flatten(), T.flatten()])
-    
-    # Normalize
-    if normalize:
-        # Normalize r to [0, 1]
-        X[:, 0] = (X[:, 0] - X[:, 0].min()) / (X[:, 0].max() - X[:, 0].min())
-        # Normalize t to [0, 1]
-        X[:, 1] = (X[:, 1] - X[:, 1].min()) / (X[:, 1].max() - X[:, 1].min())
-        
-        # Normalize targets
-        y[:, 0] = (y[:, 0] - y[:, 0].min()) / (y[:, 0].max() - y[:, 0].min() + 1e-8)
-        y[:, 1] = (y[:, 1] - y[:, 1].min()) / (y[:, 1].max() - y[:, 1].min() + 1e-8)
-    
-    return X, y
+    result = load_single_case(case_num)
+    if isinstance(result, dict):
+        return result
+
+    try:
+        temp_df, pressure_df = result
+
+        r = temp_df.columns.astype(float).to_numpy()
+        t_days = temp_df.index.astype(float).to_numpy()
+        T = temp_df.to_numpy(dtype=float)
+        u = pressure_df.to_numpy(dtype=float)
+
+        r_mesh, t_mesh = np.meshgrid(r, t_days, indexing="xy")
+
+        r_star = r_mesh / R_s
+        t_star = (t_mesh * SECONDS_PER_DAY) / t_c
+        T_star = (T - T_s) / delta_T
+        u_star = u / u_c
+
+        X = np.column_stack([r_star.ravel(), t_star.ravel()])
+        y = np.column_stack([T_star.ravel(), u_star.ravel()])
+
+        return X, y
+
+    except Exception as ex:
+        return {
+            "return_code": -1,
+            "error_message": repr(ex),
+            "traceback": traceback.format_exc(),
+        }
 
 
 if __name__ == "__main__":
-    # Example usage
     print("Loading FDM reference data...")
-    
-    # Load single case
-    try:
-        u, T, r, t = load_case(case_num=1)
-        print(f"\ncase1:")
-        print(f"  Pressure shape: {u.shape}")
-        print(f"  Temperature shape: {T.shape}")
-        print(f"  Spatial points: {len(r)}")
-        print(f"  Time steps: {len(t)}")
-    except Exception as e:
-        print(f"Error loading case1: {e}")
-    
-    # Load all cases
-    print("\n\nLoading all cases...")
+
+    single_case_result = load_single_case(case_num=1)
+    if isinstance(single_case_result, dict):
+        print("Error loading case1:")
+        print(single_case_result["error_message"])
+    else:
+        temp_df, pressure_df = single_case_result
+        print("\nCase 1:")
+        print(f"  Temperature shape: {temp_df.shape}")
+        print(f"  Pressure shape: {pressure_df.shape}")
+        print(f"  Time steps: {len(temp_df.index)}")
+        print(f"  Spatial points: {len(temp_df.columns)}")
+
+    print("\nLoading all cases...")
     all_cases = load_all_cases()
-    print(f"\nTotal cases loaded: {len(all_cases)}")
-    
-    # Prepare training data
-    print("\n\nPreparing training data for case1...")
-    try:
-        X, y = prepare_training_data(case_num=1, normalize=True)
-        print(f"Training data shapes:")
-        print(f"  Inputs (r, t): {X.shape}")
-        print(f"  Targets (u, T): {y.shape}")
-    except Exception as e:
-        print(f"Error preparing training data: {e}")
+    if isinstance(all_cases, dict) and "return_code" in all_cases:
+        print("Error loading all cases:")
+        print(all_cases["error_message"])
+    else:
+        print(f"Total cases loaded: {len(all_cases)}")
+
+    print("\nPreparing training data for case1...")
+    training_data_result = prepare_training_data(case_num=1)
+    if isinstance(training_data_result, dict):
+        print("Error preparing training data:")
+        print(training_data_result["error_message"])
+    else:
+        X, y = training_data_result
+        print("Training data:")
+        print(f"  Inputs (r*, t*): {X.shape}")
+        print(f"  Targets (T*, u*): {y.shape}")
+        print("\nFirst five samples:")
+        print("X:")
+        print(X[:5000])
+        print("\ny:")
+        print(y[:5000])
+
+    print("\nTemperature")
+    print(f"min: {y[:,0].min()}")
+    print(f"max: {y[:,0].max()}")
+
+    print("\nPressure")
+    print(f"min: {y[:,1].min()}")
+    print(f"max: {y[:,1].max()}")

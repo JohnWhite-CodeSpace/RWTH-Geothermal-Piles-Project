@@ -164,7 +164,8 @@ class Geothermal_PINN(nn.Module):
 
   
     
-    def evaluate():
+    def evaluate(self):
+        pass
 
 
 

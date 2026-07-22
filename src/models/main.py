@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from src.utils.config import PhysicsConstants
-from Sampler import GeothermalSampler
+from src.utils.Sampler import GeothermalSampler
 from pinn import GeothermalPINN
 
 

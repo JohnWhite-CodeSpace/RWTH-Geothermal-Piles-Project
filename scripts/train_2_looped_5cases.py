@@ -231,22 +231,34 @@ class PINN_U(nn.Module):
         return torch.autograd.grad(U, xi, torch.ones_like(U), create_graph=True)[0]
 
 
-def plot_daily_lines(r_ref, t_days, ref_data, pred_data, ylabel, title, savepath):
+def plot_daily_lines(r_ref, t_days, ref_data, pred_data, ylabel, title, savepath, step=100):
     """
-    One plot with every discrete day in the CSV overlaid: reference (solid) vs
-    PINN (dashed), colored by day via a colorbar. This shows the actual profile
-    shape at each sampled day directly, which the heatmap-style comparison can
-    obscure (a 2D color map hides small offsets that are obvious on a line plot).
+    One plot with every discrete day in the CSV overlaid: reference (scattered markers)
+    vs PINN (solid line), colored by day via a colorbar.
+    
+    Parameters:
+        step (int): Subsampling stride for reference spatial points to prevent overcrowding.
     """
     fig, ax = plt.subplots(figsize=(8, 6))
     norm = mcolors.Normalize(vmin=t_days.min(), vmax=t_days.max())
     cmap = cm.viridis
+
+    # Subsample spatial grid for reference markers
+    r_sub = r_ref[::step]
+
     for i, td in enumerate(t_days):
         color = cmap(norm(td))
-        ax.plot(r_ref, ref_data[i], '-', color=color, lw=1.6)
-        ax.plot(r_ref, pred_data[i], '--', color=color, lw=1.6)
-    ax.plot([], [], 'k-', label='Reference (FDM)')
-    ax.plot([], [], 'k--', label='PINN')
+        ref_sub = ref_data[i][::step]
+
+        # Reference data as scattered points
+        ax.scatter(r_sub, ref_sub, color=color, s=25, alpha=0.85, zorder=3, edgecolors='none')
+        # PINN prediction as a continuous line
+        ax.plot(r_ref, pred_data[i], '-', color=color, lw=1.6, zorder=2)
+
+    # Legend proxies
+    ax.plot([], [], 'o', color='gray', label='Reference (FDM)', markersize=6)
+    ax.plot([], [], 'k-', label='PINN', lw=1.6)
+    
     ax.legend(loc='upper right', framealpha=0.9)
     sm = cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
@@ -327,17 +339,17 @@ for case_name, k_perm, Ks in CASES:
                os.path.join(OUTPUT_DIR, f'{case_name}_k{k_perm:.0e}_weights.pt'))
 
     # ---------------- Evaluate against this case's own CSVs ----------------
-    path_u_csv = os.path.join(BASE_DIR, case_name, 'excess_pore_pressure.csv')
-    path_T_csv = os.path.join(BASE_DIR, case_name, 'temperature_distribution.csv')
+    path_u_csv = os.path.join(BASE_DIR, case_name, f'{case_name}_porepressure.csv')
+    path_T_csv = os.path.join(BASE_DIR, case_name, f'{case_name}_temperature.csv')
 
     try:
         df_u = pd.read_csv(path_u_csv)
         df_T = pd.read_csv(path_T_csv)
 
         r_ref = df_T.columns[1:].astype(float).values
-        t_days = df_T['Time (days)'].values
+        t_days = df_T['time_days'].values
         T_ref = df_T.iloc[:, 1:].values
-        u_ref_data = df_u.iloc[:, 1:].values   # assumed kPa, matching the case3 CSV convention
+        u_ref_data = df_u.iloc[:, 1:].values   # assumed Pa, matching the case3 CSV convention
 
         xi_grid = torch.tensor(r_ref / Rs, dtype=torch.float32)
         tau_grid = torch.tensor((t_days * 86400.0) / t_E, dtype=torch.float32)
@@ -379,10 +391,10 @@ for case_name, k_perm, Ks in CASES:
 
         fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
         im0 = axes[0].imshow(u_pred.T, aspect='auto', origin='lower', extent=extent, cmap='viridis')
-        axes[0].set_title('PINN Pore Pressure (kPa)', fontweight='bold'); axes[0].set_xlabel('Time (days)'); axes[0].set_ylabel('Radius r (m)')
+        axes[0].set_title('PINN Pore Pressure (Pa)', fontweight='bold'); axes[0].set_xlabel('Time (days)'); axes[0].set_ylabel('Radius r (m)')
         fig.colorbar(im0, ax=axes[0])
         im1 = axes[1].imshow(u_ref_data.T, aspect='auto', origin='lower', extent=extent, cmap='viridis')
-        axes[1].set_title('Reference Pore Pressure (kPa)', fontweight='bold'); axes[1].set_xlabel('Time (days)')
+        axes[1].set_title('Reference Pore Pressure (Pa)', fontweight='bold'); axes[1].set_xlabel('Time (days)')
         fig.colorbar(im1, ax=axes[1])
         im2 = axes[2].imshow(np.abs(u_pred - u_ref_data).T, aspect='auto', origin='lower', extent=extent, cmap='inferno')
         axes[2].set_title(f'Absolute Error (Rel L2: {err_L2_u*100:.2f}%)', fontweight='bold'); axes[2].set_xlabel('Time (days)')
@@ -399,7 +411,7 @@ for case_name, k_perm, Ks in CASES:
             savepath=os.path.join(OUTPUT_DIR, f'{tag}_temperature_daily_lines.png'),
         )
         plot_daily_lines(
-            r_ref, t_days, u_ref_data, u_pred, ylabel='Excess pore pressure (kPa)',
+            r_ref, t_days, u_ref_data, u_pred, ylabel='Excess pore pressure (Pa)',
             title=f'{case_name} (k={k_perm:.0e}, K={Ks:.0e}) — Pressure by day',
             savepath=os.path.join(OUTPUT_DIR, f'{tag}_pressure_daily_lines.png'),
         )
@@ -415,4 +427,4 @@ df_summary = pd.DataFrame(summary)
 print('\n================ Summary (all cases) ================')
 print(df_summary.to_string(index=False))
 df_summary.to_csv(os.path.join(OUTPUT_DIR, 'summary_all_cases.csv'), index=False)
-print(f'\nSaved plots + weights + summary_all_cases.csv to: {OUTPUT_DIR}')
+print(f'\nSaved plots + weights + summary_all_cases.csv to: {OUTPUT_DIR}')  

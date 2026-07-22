@@ -1,11 +1,18 @@
 from typing import List, Tuple
-from scipy.stats.qmc import LatinHypercube
+
 import numpy as np
 import torch
+from scipy.stats.qmc import LatinHypercube
 
 def generate_grid_sample(n_samples: int, spans: List[Tuple[float, float]]) -> torch.Tensor:
     """
     Generate uniform grid samples across given dimensions.
+
+    If n_samples is not a perfect n_dims-th power, the full regular grid
+    (nums_each_dim ** n_dims points) is subsampled down to n_samples by
+    picking indices evenly spread across the flattened grid. A plain
+    prefix slice would instead drop only the tail of the flattened grid,
+    which cuts a whole edge of the domain rather than thinning it evenly.
 
     Args:
         n_samples: Total number of desired points.
@@ -21,7 +28,11 @@ def generate_grid_sample(n_samples: int, spans: List[Tuple[float, float]]) -> to
     grid = torch.meshgrid(*grids, indexing="ij")
     grid_points = torch.stack([g.flatten() for g in grid], dim=1)
 
-    return grid_points[:n_samples]
+    if grid_points.shape[0] == n_samples:
+        return grid_points
+
+    indices = torch.linspace(0, grid_points.shape[0] - 1, n_samples).round().long()
+    return grid_points[indices]
 
 
 def generate_lhs_sample(n_samples: int, spans: List[Tuple[float, float]]) -> torch.Tensor:
@@ -68,7 +79,7 @@ def generate_random_sample(n_samples: int, spans: List[Tuple[float, float]]) -> 
 class GeothermalSampler:
     """Data sampler for the Geothermal PINN domain, initial, and boundary conditions.
 
-    This class handles the generation of collocation points for dimensionless radius (r*) 
+    This class handles the generation of collocation points for dimensionless radius (r*)
     and time (t*) using various sampling strategies (Grid, LHS, Random).
     """
 
@@ -82,9 +93,42 @@ class GeothermalSampler:
         """
         self.spans = spans
 
-    def sample(self, num_dom: int, num_ic: int,
-        num_bc: int, methods: Tuple[str, str, str] = ("lhs", "grid", "grid"), device: str = "cpu"
-        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    @staticmethod
+    def _sample_points(
+            num_points: int,
+            spans: List[Tuple[float, float]],
+            method: str = "lhs",
+    ) -> torch.Tensor:
+        """
+        Generate sample points using the selected sampling strategy.
+
+        Args:
+            num_points: Number of points to generate.
+            spans: Sampling bounds for each dimension.
+            method: Sampling strategy ('grid', 'lhs', or 'random').
+
+        Returns:
+            Sampled points.
+        """
+        if method == "grid":
+            return generate_grid_sample(num_points, spans)
+
+        if method == "lhs":
+            return generate_lhs_sample(num_points, spans)
+
+        if method == "random":
+            return generate_random_sample(num_points, spans)
+
+        raise ValueError("Method must be 'grid', 'lhs', or 'random'.")
+
+    def sample(
+        self,
+        num_dom: int,
+        num_ic: int,
+        num_bc: int,
+        methods: Tuple[str, str, str] = ("lhs", "grid", "grid"),
+        device: str = "cpu",
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Generate all required collocation points for the PINN.
 
@@ -104,9 +148,12 @@ class GeothermalSampler:
 
         return dom_points, ic_points, bc_pile_points, bc_far_points
 
-    def sample_domain_points(self, num_points: int, method: str = "lhs", device: str = "cpu") -> torch.Tensor:
+    def sample_domain_points(self, num_points: int, method: str = "lhs",device: str = "cpu",) -> torch.Tensor:
         """
         Sample interior domain points.
+
+        Points are slightly offset from boundaries to avoid singularities during
+        PDE residual calculations (e.g., dividing by zero at r=0).
 
         Args:
             num_points: Number of domain points to generate.
@@ -117,21 +164,18 @@ class GeothermalSampler:
             PyTorch tensor of domain points, shape (num_points, 2).
         """
         # Offset to prevent dividing by zero or strictly overlapping with BCs/ICs
-        safe_spans = [(span[0], span[1]) for span in self.spans]
+        safe_spans = [(span[0] + 1e-5, span[1] - 1e-5) for span in self.spans]
 
-        if method == "grid":
-            points = generate_grid_sample(num_points, safe_spans)
-        elif method == "lhs":
-            points = generate_lhs_sample(num_points, safe_spans)
-        elif method == "random":
-            points = generate_random_sample(num_points, safe_spans)
-        else:
-            raise ValueError("Method must be 'grid', 'lhs', or 'random'.")
-            
+        points = self._sample_points(num_points, safe_spans, method)
+
         return points.to(torch.device(device))
 
-    def sample_ic_points(self, num_points: int,
-        method: str = "grid", device: str = "cpu") -> torch.Tensor:
+    def sample_ic_points(
+        self,
+        num_points: int,
+        method: str = "grid",
+        device: str = "cpu",
+    ) -> torch.Tensor:
         """
         Sample initial condition points (t* = 0).
 
@@ -147,19 +191,19 @@ class GeothermalSampler:
 
         if method == "grid":
             r = torch.linspace(r_span[0][0], r_span[0][1], num_points).reshape(-1, 1)
-        elif method == "lhs":
-            r = generate_lhs_sample(num_points, r_span)
-        elif method == "random":
-            r = generate_random_sample(num_points, r_span)
         else:
-            raise ValueError("Method must be 'grid', 'lhs', or 'random'.")
+            r = self._sample_points(num_points, r_span, method)
 
         t = torch.zeros_like(r)
-        
+
         return torch.cat((r, t), dim=1).to(torch.device(device))
 
-    def sample_bc_points(self, num_points: int,
-        method: str = "grid", device: str = "cpu") -> Tuple[torch.Tensor, torch.Tensor]:
+    def sample_bc_points(
+        self,
+        num_points: int,
+        method: str = "grid",
+        device: str = "cpu",
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample boundary condition points at the inner pile (r_min) and far-field (r_max).
 
@@ -175,12 +219,8 @@ class GeothermalSampler:
 
         if method == "grid":
             t = torch.linspace(t_span[0][0], t_span[0][1], num_points).reshape(-1, 1)
-        elif method == "lhs":
-            t = generate_lhs_sample(num_points, t_span)
-        elif method == "random":
-            t = generate_random_sample(num_points, t_span)
         else:
-            raise ValueError("Method must be 'grid', 'lhs', or 'random'.")
+            t = self._sample_points(num_points, t_span, method)
 
         r_pile = torch.full_like(t, self.spans[0][0])
         r_far = torch.full_like(t, self.spans[0][1])
@@ -188,67 +228,51 @@ class GeothermalSampler:
         bc_pile_points = torch.cat((r_pile, t), dim=1)
         bc_far_points = torch.cat((r_far, t), dim=1)
 
-        return bc_pile_points.to(torch.device(device)), bc_far_points.to(torch.device(device))
-
+        return bc_pile_points.to(torch.device(device)), bc_far_points.to(
+            torch.device(device)
+        )
 
 if __name__ == "__main__":
+    spans = [
+        (0.0, 1.0),   # r*
+        (0.0, 2.0),   # t*
+    ]
 
-    # Dimensionless domain:
-    # r* in [0, 1]
-    # t* in [0, 1]
-    spans = [(0.0, 1.0), (0.0, 1.0)]   # radius & time
     sampler = GeothermalSampler(spans)
 
-    print("=" * 60)
-    print("DOMAIN SAMPLING")
-    print("=" * 60)
+    methods_to_test = ["grid", "lhs", "random"]
 
-    for method in ["grid", "lhs", "random"]:
-        print(f"\nMethod: {method}")
-        pts = sampler.sample_domain_points(num_points=20, method=method)
-        print(f"Shape: {pts.shape}")
-        print(pts[:10])
+    for method in methods_to_test:
+        print(f"\n{'=' * 20}")
+        print(f"Testing '{method}' sampling")
+        print(f"{'=' * 20}")
 
-    print("\n" + "=" * 60)
-    print("INITIAL CONDITION SAMPLING")
-    print("=" * 60)
+        dom_points, ic_points, bc_pile_points, bc_far_points = sampler.sample(
+            num_dom=20,
+            num_ic=10,
+            num_bc=10,
+            methods=(method, method, method),
+        )
 
-    ic = sampler.sample_ic_points(num_points=10, method="grid")
+        print(f"Domain points shape:  {dom_points.shape}")
+        print(f"IC points shape:      {ic_points.shape}")
+        print(f"Pile BC shape:        {bc_pile_points.shape}")
+        print(f"Far BC shape:         {bc_far_points.shape}")
 
-    print(f"Shape: {ic.shape}")
-    print(ic)
+        print("\nFirst 5 domain points:")
+        print(dom_points[:5])
 
-    print("\n" + "=" * 60)
-    print("BOUNDARY CONDITION SAMPLING")
-    print("=" * 60)
+        print("\nFirst 5 IC points:")
+        print(ic_points[:5])
 
-    bc_pile, bc_far = sampler.sample_bc_points(num_points=10, method="grid")
+        print("\nFirst 5 pile BC points:")
+        print(bc_pile_points[:5])
 
-    print("Pile boundary:")
-    print(bc_pile)
+        print("\nFirst 5 far BC points:")
+        print(bc_far_points[:5])
 
-    print("\nFar boundary:")
-    print(bc_far)
-
-    print("\n" + "=" * 60)
-    print("FULL PINN SAMPLING")
-    print("=" * 60)
-
-    dom, ic, bc_pile, bc_far = sampler.sample(num_dom=100, num_ic=20, num_bc=20, methods=("lhs", "grid", "random"))
-
-    print(f"Domain:        {dom.shape}")
-    print(f"Initial cond.: {ic.shape}")
-    print(f"Pile BC:       {bc_pile.shape}")
-    print(f"Far BC:        {bc_far.shape}")
-
-    print("\nFirst 5 domain points:")
-    print(dom[:5])
-
-    print("\nFirst 5 IC points:")
-    print(ic[:5])
-
-    print("\nFirst 5 pile BC points:")
-    print(bc_pile[:5])
-
-    print("\nFirst 5 far BC points:")
-    print(bc_far[:5])
+        print("\nTesting non-perfect grid (95 points)...")
+        grid = generate_grid_sample(95, spans)
+        print(f"Generated shape: {grid.shape}")
+        print(f"Unique r values: {len(torch.unique(grid[:, 0]))}")
+        print(f"Unique t values: {len(torch.unique(grid[:, 1]))}")

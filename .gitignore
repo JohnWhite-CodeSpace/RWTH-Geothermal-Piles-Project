@@ -45,8 +45,6 @@ venv.bak/
 .jupyterlab-settings/
 
 # Data & Models (IMPORTANT - customize as needed)
-data/raw/
-data/processed/
 models/saved/
 models/checkpoints/
 *.h5
@@ -93,6 +91,5 @@ Thumbs.db
 *.mp4
 *.mov
 *.avi
-*.csv
 *.dat
 *.nc

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Tuple
 import numpy as np
 import pandas as pd
-import config as cfg
+from src.utils import config as cfg
 SECONDS_PER_DAY = 24.0 * 60.0 * 60.0
 
 PHYS_CONST = cfg.PhysicsConstants()

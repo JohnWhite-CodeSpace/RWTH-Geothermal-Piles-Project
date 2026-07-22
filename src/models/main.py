@@ -10,8 +10,10 @@ import torch.nn as nn
 import torch.optim as optim
 
 from src.utils.config import PhysicsConstants
-from src.utils.Sampler import GeothermalSampler
+from src.utils.sampler import GeothermalSampler
+from src.utils import data_loader
 from pinn import GeothermalPINN
+from src.utils import config 
 
 
 def build_network(input_dim: int = 2, output_dim: int = 2) -> nn.Module:

@@ -80,7 +80,8 @@ class GeothermalSampler:
     """Data sampler for the Geothermal PINN domain, initial, and boundary conditions.
 
     This class handles the generation of collocation points for dimensionless radius (r*)
-    and time (t*) using various sampling strategies (Grid, LHS, Random).
+    and time (t*) using various sampling strategies (Grid, LHS, Random), with support
+    for logarithmic sampling in the radial direction to capture steep gradients.
     """
 
     def __init__(self, spans: List[Tuple[float, float]]):
@@ -90,6 +91,7 @@ class GeothermalSampler:
         Args:
             spans: A list containing tuples of (min, max) for each dimension.
                 Expected format: [(r_min, r_max), (t_min, t_max)].
+                Note: For logarithmic sampling, r_min must be strictly > 0.
         """
         self.spans = spans
 
@@ -127,6 +129,7 @@ class GeothermalSampler:
         num_ic: int,
         num_bc: int,
         methods: Tuple[str, str, str] = ("lhs", "grid", "grid"),
+        log_r: bool = False,
         device: str = "cpu",
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -137,18 +140,25 @@ class GeothermalSampler:
             num_ic: Number of initial condition points.
             num_bc: Number of boundary points (per boundary).
             methods: Sampling methods for [domain, IC, BCs]. Defaults to ("lhs", "grid", "grid").
+            log_r: If True, concentrates points near the inner boundary using a log-scale.
             device: Device to store the tensors on.
 
         Returns:
             Tuple containing (domain_points, ic_points, bc_pile_points, bc_far_points).
         """
-        dom_points = self.sample_domain_points(num_dom, method=methods[0], device=device)
-        ic_points = self.sample_ic_points(num_ic, method=methods[1], device=device)
+        dom_points = self.sample_domain_points(num_dom, method=methods[0], log_r=log_r, device=device)
+        ic_points = self.sample_ic_points(num_ic, method=methods[1], log_r=log_r, device=device)
         bc_pile_points, bc_far_points = self.sample_bc_points(num_bc, method=methods[2], device=device)
 
         return dom_points, ic_points, bc_pile_points, bc_far_points
 
-    def sample_domain_points(self, num_points: int, method: str = "lhs",device: str = "cpu",) -> torch.Tensor:
+    def sample_domain_points(
+        self, 
+        num_points: int, 
+        method: str = "lhs",
+        log_r: bool = False,
+        device: str = "cpu"
+    ) -> torch.Tensor:
         """
         Sample interior domain points.
 
@@ -158,15 +168,23 @@ class GeothermalSampler:
         Args:
             num_points: Number of domain points to generate.
             method: Sampling method ('grid', 'lhs', or 'random').
+            log_r: If True, samples r in log-space and exponentiates to concentrate points near r_min.
             device: Target device for the tensor.
 
         Returns:
             PyTorch tensor of domain points, shape (num_points, 2).
         """
-        # Offset to prevent dividing by zero or strictly overlapping with BCs/ICs
         safe_spans = [(span[0] + 1e-5, span[1] - 1e-5) for span in self.spans]
 
+        if log_r:
+            # Transform r-span to logarithmic space
+            safe_spans[0] = (np.log(safe_spans[0][0]), np.log(safe_spans[0][1]))
+
         points = self._sample_points(num_points, safe_spans, method)
+
+        if log_r:
+            # Convert r coordinates back to linear physical space
+            points[:, 0] = torch.exp(points[:, 0])
 
         return points.to(torch.device(device))
 
@@ -174,6 +192,7 @@ class GeothermalSampler:
         self,
         num_points: int,
         method: str = "grid",
+        log_r: bool = False,
         device: str = "cpu",
     ) -> torch.Tensor:
         """
@@ -182,6 +201,7 @@ class GeothermalSampler:
         Args:
             num_points: Number of IC points to generate.
             method: Sampling method ('grid', 'lhs', or 'random').
+            log_r: If True, samples r in log-space.
             device: Target device for the tensor.
 
         Returns:
@@ -189,10 +209,16 @@ class GeothermalSampler:
         """
         r_span = [(self.spans[0][0], self.spans[0][1])]
 
+        if log_r:
+            r_span[0] = (np.log(r_span[0][0]), np.log(r_span[0][1]))
+
         if method == "grid":
             r = torch.linspace(r_span[0][0], r_span[0][1], num_points).reshape(-1, 1)
         else:
             r = self._sample_points(num_points, r_span, method)
+
+        if log_r:
+            r = torch.exp(r)
 
         t = torch.zeros_like(r)
 
@@ -233,9 +259,10 @@ class GeothermalSampler:
         )
 
 if __name__ == "__main__":
+    # IMPORTANT: r_min must be strictly > 0 for logarithmic sampling to work.
     spans = [
-        (0.0, 1.0),   # r*
-        (0.0, 2.0),   # t*
+        (0.0167, 1.0),  # r* (Adjusted from 0.0 to 0.0167 for log safety)
+        (0.0, 2.0),     # t*
     ]
 
     sampler = GeothermalSampler(spans)
@@ -244,7 +271,7 @@ if __name__ == "__main__":
 
     for method in methods_to_test:
         print(f"\n{'=' * 20}")
-        print(f"Testing '{method}' sampling")
+        print(f"Testing '{method}' sampling (WITH LOG_R = TRUE)")
         print(f"{'=' * 20}")
 
         dom_points, ic_points, bc_pile_points, bc_far_points = sampler.sample(
@@ -252,6 +279,7 @@ if __name__ == "__main__":
             num_ic=10,
             num_bc=10,
             methods=(method, method, method),
+            log_r=True,  # Activated Logarithmic Sampling
         )
 
         print(f"Domain points shape:  {dom_points.shape}")
@@ -259,20 +287,5 @@ if __name__ == "__main__":
         print(f"Pile BC shape:        {bc_pile_points.shape}")
         print(f"Far BC shape:         {bc_far_points.shape}")
 
-        print("\nFirst 5 domain points:")
+        print("\nFirst 5 domain points (notice r is clustered near 0.0167):")
         print(dom_points[:5])
-
-        print("\nFirst 5 IC points:")
-        print(ic_points[:5])
-
-        print("\nFirst 5 pile BC points:")
-        print(bc_pile_points[:5])
-
-        print("\nFirst 5 far BC points:")
-        print(bc_far_points[:5])
-
-        print("\nTesting non-perfect grid (95 points)...")
-        grid = generate_grid_sample(95, spans)
-        print(f"Generated shape: {grid.shape}")
-        print(f"Unique r values: {len(torch.unique(grid[:, 0]))}")
-        print(f"Unique t values: {len(torch.unique(grid[:, 1]))}")

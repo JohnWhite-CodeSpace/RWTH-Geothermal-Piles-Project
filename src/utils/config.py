@@ -15,7 +15,6 @@ class PhysicsConstants:
         self.T_s = 12
         self.T_f = 50
         self.t_c = 1e7
-        self.u_c = 8e5
         self.beta_p = 3.00e-5  # Thermal expansion, soil particles (1/C)
         self.beta_w = 3.42e-4  # Thermal expansion, water (1/C)
         self.alpha_w = 5.00e-10  # Compressibility, water (1/Pa)
@@ -30,8 +29,8 @@ class PhysicsConstants:
         )  # Thermal diffusivity (m2/s)
 
     def calculate_physics_constants(
-        self, k: float, Ks: float = 2e6, t_c: float = 1e7, u_c: float = 1e6
-    ) -> Tuple[float, float, float]:
+        self, k: float, Ks: float = 2e6, t_c: float = 1e7
+    ) -> Tuple[float, float, float, float]:
         """
         Compute the nondimensional coefficients for the governing PDEs.
 
@@ -48,9 +47,10 @@ class PhysicsConstants:
         A = (1 - self.n) * self.beta_p + self.n * self.beta_w
         B = (self.n * self.alpha_w) + (1 / Ks)
         C = k / self.gamma_w
+        natural_uc = (A * self.delta_T) / B
 
         C1 = (self.alpha * t_c) / (self.R_s**2)
-        C2 = (A * self.delta_T) / (B * u_c)
+        C2 = (A * self.delta_T) / (B * natural_uc)
         C3 = (C * t_c) / (B * (self.R_s**2))
 
-        return C1, C2, C3
+        return C1, C2, C3, natural_uc

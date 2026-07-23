@@ -16,13 +16,13 @@ from pinn import GeothermalPINN
 from src.utils import config 
 
 
-def build_network(input_dim: int = 2, output_dim: int = 2) -> nn.Module:
+def build_network(input_dim: int = 2, output_dim: int = 1) -> nn.Module:
     """
     Construct the underlying Multi-Layer Perceptron (MLP) architecture.
 
     Args:
         input_dim: Number of input features (r*, t*). Defaults to 2.
-        output_dim: Number of output features (T*, u*). Defaults to 2.
+        output_dim: Number of output features. Defaults to 1 (decoupled networks).
 
     Returns:
         A PyTorch Sequential model mapping input coordinates to outputs.
@@ -46,7 +46,7 @@ def run_geothermal_pipeline() -> None:
 
     This function coordinates the execution flow:
     1. Generates collocation points via GeothermalSampler.
-    2. Builds the neural network and initializes GeothermalPINN.
+    2. Builds independent neural networks for T and u, initializing GeothermalPINN.
     3. Trains the PINN on the governing PDEs, ICs, and BCs.
     4. Evaluates the trained predictions against the FDM reference case.
     """
@@ -57,15 +57,15 @@ def run_geothermal_pipeline() -> None:
 
     # Nondimensional physical governing coefficients
     t_c_val = 1e7
-    u_c_val = 8e5
+    
     
     physics = PhysicsConstants()
-    C1, C2, C3 = physics.calculate_physics_constants(
+    C1, C2, C3, u_c_val = physics.calculate_physics_constants(
         k=1.00e-8,
         Ks=2.0e6,
-        t_c=t_c_val,
-        u_c=u_c_val
+        t_c=t_c_val
     )
+    print(f"\n[PHYSICS CHECK] C1: {C1:.4e} | C2: {C2:.4e} | C3: {C3:.4e}\n")
 
     # Define domain spatial and temporal boundaries [(r_min, r_max), (t_min, t_max)]
     domain_spans = [(0.0167, 1.0), (0.0, 1.0)]
@@ -78,13 +78,17 @@ def run_geothermal_pipeline() -> None:
         num_ic=500,
         num_bc=500,
         methods=("lhs", "grid", "grid"),
+        log_r=True,
         device=device,
     )
 
-    # 2. Construct network and instantiate PINN model
-    print(">>> Initializing GeothermalPINN model...")
-    net_u = build_network(input_dim=2, output_dim=2)
-    model = GeothermalPINN(net_u=net_u, device=device)
+    # 2. Construct independent networks and instantiate PINN model
+    print(">>> Initializing GeothermalPINN model with decoupled networks...")
+    
+    net_T = build_network(input_dim=2, output_dim=1)
+    net_u = build_network(input_dim=2, output_dim=1)
+    
+    model = GeothermalPINN(net_T=net_T, net_u=net_u, device=device)
 
     # 3. Train the neural network
     print(f">>> Training model for {epochs} epochs on {device.upper()}...")

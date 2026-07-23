@@ -1,7 +1,22 @@
-from typing import Optional, Tuple, Type
+from typing import Dict, Optional, Tuple, Type
 
+import numpy as np
 import torch
 import torch.nn as nn
+
+
+def error_metrics(pred: np.ndarray, true: np.ndarray) -> Tuple[float, float, float]:
+    """
+    Compute MSE, relative L2 norm error, and NRMSE between pred and true.
+
+    Shared by `GeothermalPINN.evaluate` and `PINNEnsemble.evaluate`
+    (src/models/ensemble.py) so both report metrics the same way.
+    """
+    mse = float(np.mean((pred - true) ** 2))
+    rel_l2 = float(np.linalg.norm(pred - true) / np.linalg.norm(true))
+    denom = max(float(np.max(np.abs(true))), 1e-12)
+    nrmse = float(np.sqrt(mse) / denom)
+    return mse, rel_l2, nrmse
 
 
 class GeothermalPINN(nn.Module):
@@ -85,14 +100,18 @@ class GeothermalPINN(nn.Module):
     def loss_pde(self, r: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Compute the PDE residual loss."""
         pde_residual = self.pde_residual(r, t)
-        return self.loss_fn(pde_residual, torch.zeros_like(pde_residual))
+        res_T = pde_residual[:, 0:1]
+        res_u = pde_residual[:, 1:2]
+        loss_T = self.loss_fn(res_T, torch.zeros_like(res_T))
+        loss_u = self.loss_fn(res_u, torch.zeros_like(res_u))
+        return self.w_T * loss_T + self.w_u * loss_u
 
     def loss_ic(self, r: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Compute the initial condition loss (T*=0, u*=0 at t=0)."""
         T, u = self.net_u_forward(r, t)
         ic_loss_T = self.loss_fn(T, torch.zeros_like(T))
         ic_loss_u = self.loss_fn(u, torch.zeros_like(u))
-        return ic_loss_T + ic_loss_u
+        return self.w_T * ic_loss_T + self.w_u * ic_loss_u
 
     def loss_bc_pile(self, r: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Compute the pile boundary loss (r*=0.0167): T*=1, du/dr=0."""
@@ -103,7 +122,7 @@ class GeothermalPINN(nn.Module):
         u_r = torch.autograd.grad(u, r, torch.ones_like(u), create_graph=True)[0]
         bc_loss_u = self.loss_fn(u_r, torch.zeros_like(u_r))
 
-        return bc_loss_T + bc_loss_u
+        return self.w_T * bc_loss_T + self.w_u * bc_loss_u
 
     def loss_bc_far(self, r: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Compute the far-field boundary loss (r*=1.0): T*=0, u*=0."""
@@ -112,7 +131,7 @@ class GeothermalPINN(nn.Module):
         bc_loss_T = self.loss_fn(T, torch.zeros_like(T))
         bc_loss_u = self.loss_fn(u, torch.zeros_like(u))
 
-        return bc_loss_T + bc_loss_u
+        return self.w_T * bc_loss_T + self.w_u * bc_loss_u
 
     def pinn_loss(self) -> torch.Tensor:
         """Compute and backpropagate the total training loss for one step."""
@@ -148,6 +167,7 @@ class GeothermalPINN(nn.Module):
                 f"Far BC Loss: {bc_far_loss.item():.3e}"
             )
         self.iter += 1
+        self.loss_history.append(total_loss.item())
         return total_loss
 
     def train_net(
@@ -162,9 +182,16 @@ class GeothermalPINN(nn.Module):
         epochs: int,
         optimizer: Type[torch.optim.Optimizer] = torch.optim.Adam,
         log_interval: int = 100,
+        w_T: float = 1.0,
+        w_u: float = 1.0,
     ) -> None:
         """
         Train the network on the PDE, initial condition, and boundary losses.
+
+        Calling this more than once on the same instance (e.g. Adam
+        first, then LBFGS) continues training from the current weights
+        and appends to the existing loss history, giving a fine-tuning
+        stage rather than starting over.
 
         Args:
             domain_points: Interior collocation points, columns [r, t].
@@ -177,6 +204,11 @@ class GeothermalPINN(nn.Module):
             epochs: Number of training iterations.
             optimizer: Optimizer class to use (Adam or LBFGS).
             log_interval: Number of iterations between log prints.
+            w_T: Weight applied to temperature loss terms.
+            w_u: Weight applied to pore-pressure loss terms. u* is ~2-3
+                orders of magnitude smaller than T* (see Table 1), so an
+                equal-weight MSE lets the temperature loss dominate the
+                gradient; raise w_u to counteract that imbalance.
         """
         self.domain_points = domain_points
         self.ic_points = ic_points
@@ -186,10 +218,14 @@ class GeothermalPINN(nn.Module):
         self.C1 = C1
         self.C2 = C2
         self.C3 = C3
+        self.w_T = w_T
+        self.w_u = w_u
 
         self.net_u.train()
         self.iter = 0
         self.log_interval = log_interval
+        if not hasattr(self, "loss_history"):
+            self.loss_history = []
 
         if optimizer is torch.optim.LBFGS:
             self.optimizer_name = "LBFGS"
@@ -229,6 +265,43 @@ class GeothermalPINN(nn.Module):
             T_pred, u_pred = self.net_u_forward(r, t)
             return T_pred.cpu().numpy(), u_pred.cpu().numpy()
 
-    def evaluate(self):
-        """Evaluate predictions against FDM reference data."""
-        raise NotImplementedError
+    def evaluate(
+        self,
+        r: torch.Tensor,
+        t: torch.Tensor,
+        T_true: np.ndarray,
+        u_true: np.ndarray,
+    ) -> Dict[str, float]:
+        """
+        Evaluate predictions against reference (e.g. FDM) data.
+
+        Args:
+            r: Dimensionless radius of the reference points, shape (N, 1).
+            t: Dimensionless time of the reference points, shape (N, 1).
+            T_true: Reference dimensionless temperature, shape (N, 1).
+            u_true: Reference dimensionless pore pressure, shape (N, 1).
+
+        Returns:
+            Dictionary with MSE, relative L2 error, and NRMSE for T and
+            u. Relative L2 error (||pred-true|| / ||true||) can look
+            huge for a field that is close to zero almost everywhere
+            (like u* here, away from the pile) even when the absolute
+            fit is good, because the denominator is dominated by a
+            small localized signal. NRMSE (RMSE normalized by
+            max(|true|)) is far less sensitive to that and better
+            reflects fit quality relative to the field's actual
+            dynamic range.
+        """
+        T_pred, u_pred = self.predict(r, t)
+
+        T_mse, T_rel_l2, T_nrmse = error_metrics(T_pred, T_true)
+        u_mse, u_rel_l2, u_nrmse = error_metrics(u_pred, u_true)
+
+        return {
+            "T_mse": T_mse,
+            "T_rel_l2": T_rel_l2,
+            "T_nrmse": T_nrmse,
+            "u_mse": u_mse,
+            "u_rel_l2": u_rel_l2,
+            "u_nrmse": u_nrmse,
+        }

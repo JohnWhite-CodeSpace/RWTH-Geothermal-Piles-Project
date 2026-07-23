@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Tuple
 import numpy as np
 import pandas as pd
-import config as cfg
+from src.utils import config as cfg
 SECONDS_PER_DAY = 24.0 * 60.0 * 60.0
 
 PHYS_CONST = cfg.PhysicsConstants()
@@ -50,10 +50,10 @@ def load_single_case(
 
         root = Path(__file__).resolve().parent.parent.parent
         temp_path = (
-            root / "data" / "raw" / f"case{case_num}" / "temperature_distribution.csv"
+            root / "data" / "raw" / f"case{case_num}" / f"case{case_num}_temperature.csv"
         )
         pressure_path = (
-            root / "data" / "raw" / f"case{case_num}" / "excess_pore_pressure.csv"
+            root / "data" / "raw" / f"case{case_num}" / f"case{case_num}_porepressure.csv"
         )
 
         temp_df = pd.read_csv(temp_path, index_col=0)
@@ -140,8 +140,7 @@ def prepare_training_data(case_num: int) -> Tuple[np.ndarray, np.ndarray] | dict
 
     try:
         temp_df, pressure_df = result
-
-        r = temp_df.columns.astype(float).to_numpy()
+        r = temp_df.columns.str.replace("r=", "", regex=False).astype(float).to_numpy()
         t_days = temp_df.index.astype(float).to_numpy()
         T = temp_df.to_numpy(dtype=float)
         u = pressure_df.to_numpy(dtype=float)

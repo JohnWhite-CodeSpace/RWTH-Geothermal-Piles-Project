@@ -36,6 +36,12 @@ Gamma = 2.0
 C_s = 1674.4
 gamma_w = 1000.0 * 9.81
 t_E = 15 * 24 * 3600.0   # keep consistent with whatever the case CSVs' time horizon is
+t_ramp = 1 * 24 * 3600.0        # 1-day linear ramp for the pile-soil interface temperature
+tau_ramp = t_ramp / t_E         # = 1/15 with t_E = 15 days
+
+def theta_inner_bc_target(tau):
+    """Theta ramps 0 -> 1 linearly over the first day, then holds at 1."""
+    return torch.clamp(tau / tau_ramp, max=1.0)
 
 alpha = Gamma / (rho_s * C_s)
 beta_bar = (1 - n) * beta_s + n * beta_w
@@ -52,7 +58,7 @@ print(f'xi_R     = {xi_R:.5f} | alpha_n = {alpha_n:.5e}')
 # =========================================================
 
 BASE_DIR = '/Users/seanxie/Desktop/RWTH PINN/Geothermal Piles Updated'
-OUTPUT_DIR = os.path.join(BASE_DIR, 'pinn_task2_results_5cases')
+OUTPUT_DIR = os.path.join(BASE_DIR, 'pinn_task2_results_5cases_equal_loss_weights')
 
 
 CASES = [
@@ -84,7 +90,7 @@ class MLP(nn.Module):
 
 
 def lhs_sample(n_pts, spans):
-    lhs = LatinHypercube(d=len(spans))
+    lhs = LatinHypercube(d=len(spans), seed=SEED)
     s = lhs.random(n=n_pts)
     for i, span in enumerate(spans):
         s[:, i] = span[0] + (span[1] - span[0]) * s[:, i]
@@ -160,9 +166,9 @@ for ep in range(EPOCHS_T):
     res = model_T.pde_residual(xi_dom, tau_dom)
     loss_pde = mse(res, torch.zeros_like(res))
     loss_ic = mse(model_T(xi_ic, tau_ic), torch.zeros_like(xi_ic))
-    loss_bcL = mse(model_T(xi_bcL, tau_bcL), torch.ones_like(xi_bcL))
+    loss_bcL = mse(model_T(xi_bcL, tau_bcL), theta_inner_bc_target(tau_bcL))
     loss_bcR = mse(model_T(xi_bcR, tau_bcR), torch.zeros_like(xi_bcR))
-    loss = loss_pde + 10 * loss_ic + 10 * loss_bcL + 10 * loss_bcR
+    loss = loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
     loss.backward()
     opt_T.step()
     sched_T.step(loss.item())
@@ -178,9 +184,9 @@ def closure_T():
     res = model_T.pde_residual(xi_dom, tau_dom)
     loss_pde = mse(res, torch.zeros_like(res))
     loss_ic = mse(model_T(xi_ic, tau_ic), torch.zeros_like(xi_ic))
-    loss_bcL = mse(model_T(xi_bcL, tau_bcL), torch.ones_like(xi_bcL))
+    loss_bcL = mse(model_T(xi_bcL, tau_bcL), theta_inner_bc_target(tau_bcL))
     loss_bcR = mse(model_T(xi_bcR, tau_bcR), torch.zeros_like(xi_bcR))
-    loss = loss_pde + 10 * loss_ic + 10 * loss_bcL + 10 * loss_bcR
+    loss = loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
     loss.backward()
     if iter_T[0] % 50 == 0:
         print(f'[T-LBFGS] iter {iter_T[0]:4d} | loss={loss.item():.3e} | pde={loss_pde.item():.3e}')
@@ -230,6 +236,32 @@ class PINN_U(nn.Module):
         U = self.forward(xi, tau)
         return torch.autograd.grad(U, xi, torch.ones_like(U), create_graph=True)[0]
 
+def summarize_max(field_pred, field_ref, r_ref, t_days, label, unit):
+    """
+    Compare the peak value of a predicted field against its reference,
+    including *where* each peak occurs (radius, day).
+    field_pred / field_ref: shape (n_time, n_radius) -- matches the
+    T_pred/T_ref and u_pred/u_ref_data convention used above.
+    """
+    idx_pred = np.unravel_index(np.argmax(field_pred), field_pred.shape)
+    idx_ref = np.unravel_index(np.argmax(field_ref), field_ref.shape)
+
+    max_pred, max_ref = field_pred[idx_pred], field_ref[idx_ref]
+    rel_err_pct = abs(max_pred - max_ref) / abs(max_ref) * 100 if max_ref != 0 else float('nan')
+
+    t_pred_loc, r_pred_loc = t_days[idx_pred[0]], r_ref[idx_pred[1]]
+    t_ref_loc, r_ref_loc = t_days[idx_ref[0]], r_ref[idx_ref[1]]
+
+    text = (f"{label} peak -> PINN: {max_pred:.3f} {unit} at r={r_pred_loc:.2f} m, t={t_pred_loc:.1f} d  |  "
+            f"Reference: {max_ref:.3f} {unit} at r={r_ref_loc:.2f} m, t={t_ref_loc:.1f} d  |  "
+            f"peak rel. error: {rel_err_pct:.2f}%")
+    print(text)
+
+    stats = {f'{label}_max_pred': max_pred, f'{label}_max_ref': max_ref,
+             f'{label}_max_pred_r': r_pred_loc, f'{label}_max_pred_t': t_pred_loc,
+             f'{label}_max_ref_r': r_ref_loc, f'{label}_max_ref_t': t_ref_loc,
+             f'{label}_max_relerr_pct': rel_err_pct}
+    return stats, text, (idx_pred, idx_ref)
 
 def plot_daily_lines(r_ref, t_days, ref_data, pred_data, ylabel, title, savepath, step=100):
     """
@@ -301,7 +333,7 @@ for case_name, k_perm, Ks in CASES:
         bc_neu = model_U.neumann_bc(xi_bcL, tau_bcL)
         loss_bcL = mse(bc_neu, torch.zeros_like(bc_neu))
         loss_bcR = mse(model_U(xi_bcR, tau_bcR), torch.zeros_like(xi_bcR))
-        loss = loss_pde + 10 * loss_ic + 10 * loss_bcL + 10 * loss_bcR
+        loss = loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
         loss.backward()
         opt_U.step()
         sched_U.step(loss.item())
@@ -320,7 +352,7 @@ for case_name, k_perm, Ks in CASES:
         bc_neu = model_U.neumann_bc(xi_bcL, tau_bcL)
         loss_bcL = mse(bc_neu, torch.zeros_like(bc_neu))
         loss_bcR = mse(model_U(xi_bcR, tau_bcR), torch.zeros_like(xi_bcR))
-        loss = loss_pde + 10 * loss_ic + 10 * loss_bcL + 10 * loss_bcR
+        loss = loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
         loss.backward()
         if iter_U[0] % 50 == 0:
             print(f'[{case_name} U-LBFGS] iter {iter_U[0]:4d} | loss={loss.item():.3e} | pde={loss_pde.item():.3e}')
@@ -368,8 +400,13 @@ for case_name, k_perm, Ks in CASES:
         err_L2_u = np.linalg.norm(u_ref_data - u_pred) / np.linalg.norm(u_ref_data)
 
         print(f'{case_name}: Temperature relL2={err_L2_T*100:.2f}%  Pressure relL2={err_L2_u*100:.2f}%')
+
+        stats_T, text_T, (idxT_p, idxT_r) = summarize_max(T_pred, T_ref, r_ref, t_days, label='T', unit='degC')
+        stats_u, text_u, (idxu_p, idxu_r) = summarize_max(u_pred, u_ref_data, r_ref, t_days, label='u', unit='Pa')
+
         summary.append({'case': case_name, 'k': k_perm, 'Ks': Ks,
-                         'T_relL2_pct': err_L2_T * 100, 'u_relL2_pct': err_L2_u * 100})
+                        'T_relL2_pct': err_L2_T * 100, 'u_relL2_pct': err_L2_u * 100,
+                        **stats_T, **stats_u})
 
         tag = f'{case_name}_k{k_perm:.0e}_K{Ks:.0e}'
         extent = [t_days[0], t_days[-1], r_ref[0], r_ref[-1]]
@@ -386,6 +423,13 @@ for case_name, k_perm, Ks in CASES:
         fig.colorbar(im2, ax=axes[2])
         plt.suptitle(f'{case_name} (k={k_perm:.0e}, K={Ks:.0e}) — Temperature Field Comparison', fontsize=14, fontweight='bold')
         fig.tight_layout()
+        # --- temperature figure ---
+        axes[0].scatter(t_pred_loc := t_days[idxT_p[0]], r_ref[idxT_p[1]], marker='*', s=160,
+                        c='cyan', edgecolors='black', linewidths=0.8, zorder=5)
+        axes[1].scatter(t_days[idxT_r[0]], r_ref[idxT_r[1]], marker='*', s=160,
+                        c='cyan', edgecolors='black', linewidths=0.8, zorder=5)
+        fig.text(0.5, -0.05, text_T, ha='center', fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='whitesmoke', edgecolor='gray'))
         fig.savefig(os.path.join(OUTPUT_DIR, f'{tag}_temperature_comparison.png'), dpi=300, bbox_inches='tight')
         plt.close(fig)
 
@@ -401,6 +445,13 @@ for case_name, k_perm, Ks in CASES:
         fig.colorbar(im2, ax=axes[2])
         plt.suptitle(f'{case_name} (k={k_perm:.0e}, K={Ks:.0e}) — Excess Pore Pressure Comparison', fontsize=14, fontweight='bold')
         fig.tight_layout()
+        # --- pressure figure ---
+        axes[0].scatter(t_days[idxu_p[0]], r_ref[idxu_p[1]], marker='*', s=160,
+                        c='red', edgecolors='black', linewidths=0.8, zorder=5)
+        axes[1].scatter(t_days[idxu_r[0]], r_ref[idxu_r[1]], marker='*', s=160,
+                        c='red', edgecolors='black', linewidths=0.8, zorder=5)
+        fig.text(0.5, -0.05, text_u, ha='center', fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='whitesmoke', edgecolor='gray'))
         fig.savefig(os.path.join(OUTPUT_DIR, f'{tag}_pressure_comparison.png'), dpi=300, bbox_inches='tight')
         plt.close(fig)
 

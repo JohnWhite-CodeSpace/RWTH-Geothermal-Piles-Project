@@ -81,13 +81,24 @@ class PINNEnsemble:
 
         Returns:
             Dictionary with MSE/relative-L2/NRMSE for T and u (computed
-            on the ensemble mean), plus 1-sigma/2-sigma coverage for
-            each.
+            on the ensemble mean), 1-sigma/2-sigma coverage for each,
+            and the PDE residual RMS averaged across members (see
+            `GeothermalPINN.physics_residual_check`) as independent
+            evidence the members learned the physics, not just the
+            IC/BC targets.
         """
         T_mean, T_std, u_mean, u_std = self.predict(r, t)
 
         T_mse, T_rel_l2, T_nrmse = error_metrics(T_mean, T_true)
         u_mse, u_rel_l2, u_nrmse = error_metrics(u_mean, u_true)
+
+        residual_checks = [model.physics_residual_check(r, t) for model in self.models]
+        T_pde_residual_rms = float(
+            np.mean([check["T_pde_residual_rms"] for check in residual_checks])
+        )
+        u_pde_residual_rms = float(
+            np.mean([check["u_pde_residual_rms"] for check in residual_checks])
+        )
 
         return {
             "T_mse": T_mse,
@@ -100,6 +111,8 @@ class PINNEnsemble:
             "T_coverage_2sigma": self._coverage(T_mean, T_std, T_true, 2.0),
             "u_coverage_1sigma": self._coverage(u_mean, u_std, u_true, 1.0),
             "u_coverage_2sigma": self._coverage(u_mean, u_std, u_true, 2.0),
+            "T_pde_residual_rms": T_pde_residual_rms,
+            "u_pde_residual_rms": u_pde_residual_rms,
         }
 
     @staticmethod

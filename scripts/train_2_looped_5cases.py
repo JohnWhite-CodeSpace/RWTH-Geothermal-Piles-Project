@@ -18,7 +18,7 @@ SEED = 1235
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
 print(f'Using device: {device}')
 
 # ---------------- Physical Parameters (Geothermal Energy Pile Domain) ----------------
@@ -58,7 +58,7 @@ print(f'xi_R     = {xi_R:.5f} | alpha_n = {alpha_n:.5e}')
 # =========================================================
 
 BASE_DIR = '/Users/seanxie/Desktop/RWTH PINN/Geothermal Piles Updated'
-OUTPUT_DIR = os.path.join(BASE_DIR, 'pinn_task2_results_5cases_equal_loss_weights')
+OUTPUT_DIR = os.path.join(BASE_DIR, 'pinn_task2_results_5cases_5layers_64_weights_10x_pde_1x_ic_bc')  # weights: 100x PDE, 1x IC, 1x BC
 
 
 CASES = [
@@ -152,7 +152,7 @@ class PINN_Theta(nn.Module):
         return Th_tau - alpha_n * (Th_xi / xi + Th_xixi)
 
 
-net_T = MLP([2] + [64] * 3 + [1], nn.Tanh).to(device)
+net_T = MLP([2] + [64] * 5 + [1], nn.Tanh).to(device)
 model_T = PINN_Theta(net_T).to(device)
 
 opt_T = torch.optim.Adam(model_T.parameters(), lr=2e-3)
@@ -168,7 +168,7 @@ for ep in range(EPOCHS_T):
     loss_ic = mse(model_T(xi_ic, tau_ic), torch.zeros_like(xi_ic))
     loss_bcL = mse(model_T(xi_bcL, tau_bcL), theta_inner_bc_target(tau_bcL))
     loss_bcR = mse(model_T(xi_bcR, tau_bcR), torch.zeros_like(xi_bcR))
-    loss = loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
+    loss = 10 * loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
     loss.backward()
     opt_T.step()
     sched_T.step(loss.item())
@@ -186,7 +186,7 @@ def closure_T():
     loss_ic = mse(model_T(xi_ic, tau_ic), torch.zeros_like(xi_ic))
     loss_bcL = mse(model_T(xi_bcL, tau_bcL), theta_inner_bc_target(tau_bcL))
     loss_bcR = mse(model_T(xi_bcR, tau_bcR), torch.zeros_like(xi_bcR))
-    loss = loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
+    loss = 10 * loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
     loss.backward()
     if iter_T[0] % 50 == 0:
         print(f'[T-LBFGS] iter {iter_T[0]:4d} | loss={loss.item():.3e} | pde={loss_pde.item():.3e}')
@@ -317,7 +317,7 @@ for case_name, k_perm, Ks in CASES:
     print(f'\n================ {case_name}  (k={k_perm:.1e}, Ks={Ks:.1e}) ================')
     print(f'S={S:.4e} 1/Pa | u_ref={u_ref:.4e} Pa | D={D:.4f} | D*alpha_n={D*alpha_n:.4e}')
 
-    net_U = MLP([2] + [64] * 3 + [1], nn.Tanh).to(device)
+    net_U = MLP([2] + [64] * 5 + [1], nn.Tanh).to(device)
     model_U = PINN_U(net_U, model_T, D, alpha_n).to(device)
 
     opt_U = torch.optim.Adam(model_U.parameters(), lr=2e-3)
@@ -333,7 +333,7 @@ for case_name, k_perm, Ks in CASES:
         bc_neu = model_U.neumann_bc(xi_bcL, tau_bcL)
         loss_bcL = mse(bc_neu, torch.zeros_like(bc_neu))
         loss_bcR = mse(model_U(xi_bcR, tau_bcR), torch.zeros_like(xi_bcR))
-        loss = loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
+        loss = 10 * loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
         loss.backward()
         opt_U.step()
         sched_U.step(loss.item())
@@ -352,7 +352,7 @@ for case_name, k_perm, Ks in CASES:
         bc_neu = model_U.neumann_bc(xi_bcL, tau_bcL)
         loss_bcL = mse(bc_neu, torch.zeros_like(bc_neu))
         loss_bcR = mse(model_U(xi_bcR, tau_bcR), torch.zeros_like(xi_bcR))
-        loss = loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
+        loss = 10 * loss_pde + 1 * loss_ic + 1 * loss_bcL + 1 * loss_bcR
         loss.backward()
         if iter_U[0] % 50 == 0:
             print(f'[{case_name} U-LBFGS] iter {iter_U[0]:4d} | loss={loss.item():.3e} | pde={loss_pde.item():.3e}')

@@ -72,6 +72,8 @@ class GridPoint:
     u_mse: float = 0.0
     u_rel_l2: float = 0.0
     u_nrmse: float = 0.0
+    T_pde_residual_rms: float = 0.0
+    u_pde_residual_rms: float = 0.0
 
 
 def _architecture_label(architecture: Architecture) -> str:
@@ -237,11 +239,14 @@ def run_grid_search(
             u_mse=m["u_mse"],
             u_rel_l2=m["u_rel_l2"],
             u_nrmse=m["u_nrmse"],
+            T_pde_residual_rms=m["T_pde_residual_rms"],
+            u_pde_residual_rms=m["u_pde_residual_rms"],
         )
         results.append(point)
         print(
             f"  -> T_rel_l2={point.T_rel_l2:.4f} (NRMSE={point.T_nrmse:.3f})   "
-            f"u_rel_l2={point.u_rel_l2:.4f} (NRMSE={point.u_nrmse:.3f})"
+            f"u_rel_l2={point.u_rel_l2:.4f} (NRMSE={point.u_nrmse:.3f})   "
+            f"PDE resid T/u={point.T_pde_residual_rms:.3e}/{point.u_pde_residual_rms:.3e}"
         )
 
         CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
@@ -363,11 +368,14 @@ def run_architecture_search(
             u_mse=m["u_mse"],
             u_rel_l2=m["u_rel_l2"],
             u_nrmse=m["u_nrmse"],
+            T_pde_residual_rms=m["T_pde_residual_rms"],
+            u_pde_residual_rms=m["u_pde_residual_rms"],
         )
         results.append(point)
         print(
             f"  -> T_rel_l2={point.T_rel_l2:.4f} (NRMSE={point.T_nrmse:.3f})   "
-            f"u_rel_l2={point.u_rel_l2:.4f} (NRMSE={point.u_nrmse:.3f})"
+            f"u_rel_l2={point.u_rel_l2:.4f} (NRMSE={point.u_nrmse:.3f})   "
+            f"PDE resid T/u={point.T_pde_residual_rms:.3e}/{point.u_pde_residual_rms:.3e}"
         )
 
         CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)

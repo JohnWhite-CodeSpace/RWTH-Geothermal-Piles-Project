@@ -20,11 +20,11 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 
-from src.utils import config as cfg
+from src.utils.physics_constants import PhysicsConstants
 
 SECONDS_PER_DAY = 24.0 * 60.0 * 60.0
 
-PHYS_CONST = cfg.PhysicsConstants()
+PHYS_CONST = PhysicsConstants()
 
 
 def load_single_case(

@@ -15,14 +15,25 @@ from src.utils.data_loader import prepare_training_data
 from src.utils.physics_constants import PhysicsConstants
 from src.utils.sampler import GeothermalSampler
 
+# Single source of truth for the project's default case/experiment
+# setup. Every script should import these rather than repeating the
+# numbers -- otherwise two scripts can silently drift apart (e.g. one
+# using num_dom=4000 and another 5000) and their results stop being a
+# fair comparison without anyone noticing.
+DEFAULT_CASE_NUM = 3
+DEFAULT_SEED = 42
+DEFAULT_NUM_DOM = 4000
+DEFAULT_NUM_IC = 200
+DEFAULT_NUM_BC = 200
+
 
 def prepare_case(
-    case_num: int,
+    case_num: int = DEFAULT_CASE_NUM,
     Ks: float = DEFAULT_KS,
-    num_dom: int = 4000,
-    num_ic: int = 200,
-    num_bc: int = 200,
-    seed: int = 42,
+    num_dom: int = DEFAULT_NUM_DOM,
+    num_ic: int = DEFAULT_NUM_IC,
+    num_bc: int = DEFAULT_NUM_BC,
+    seed: int = DEFAULT_SEED,
 ) -> Tuple:
     """
     Load the FDM reference and sample the shared collocation points for a case.

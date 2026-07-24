@@ -1,5 +1,8 @@
 import os
+import sys
 import time
+from pathlib import Path
+
 from scipy.stats.qmc import LatinHypercube
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -8,6 +11,12 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from src.utils.data_loader import load_single_case
+from src.utils.metrics import physical_error_metrics
 
 # =========================================================
 # 0. Global Setup, Reproducibility & Physical Parameters
@@ -57,8 +66,10 @@ print(f'xi_R     = {xi_R:.5f} | alpha_n = {alpha_n:.5e}')
 # 1. Cases to run
 # =========================================================
 
-BASE_DIR = '/Users/seanxie/Desktop/RWTH PINN/Geothermal Piles Updated'
-OUTPUT_DIR = os.path.join(BASE_DIR, 'pinn_task2_results_5cases_5layers_64_weights_10x_pde_1x_ic_bc')  # weights: 100x PDE, 1x IC, 1x BC
+OUTPUT_DIR = os.path.join(
+    REPO_ROOT, 'data', 'processed',
+    'pinn_task2_results_5cases_5layers_64_weights_10x_pde_1x_ic_bc',
+)  # weights: 100x PDE, 1x IC, 1x BC
 
 
 CASES = [
@@ -370,18 +381,19 @@ for case_name, k_perm, Ks in CASES:
                 'alpha_n': alpha_n, 'D': D, 'xi_R': xi_R, 'k_perm': k_perm, 'Ks': Ks},
                os.path.join(OUTPUT_DIR, f'{case_name}_k{k_perm:.0e}_weights.pt'))
 
-    # ---------------- Evaluate against this case's own CSVs ----------------
-    path_u_csv = os.path.join(BASE_DIR, case_name, f'{case_name}_porepressure.csv')
-    path_T_csv = os.path.join(BASE_DIR, case_name, f'{case_name}_temperature.csv')
+    # ---------------- Evaluate against this case's own reference data ----------------
+    case_num = int(case_name.replace('case', ''))
 
     try:
-        df_u = pd.read_csv(path_u_csv)
-        df_T = pd.read_csv(path_T_csv)
+        loaded = load_single_case(case_num)
+        if isinstance(loaded, dict):
+            raise FileNotFoundError(loaded['error_message'])
+        df_T, df_u = loaded
 
-        r_ref = df_T.columns[1:].astype(float).values
-        t_days = df_T['time_days'].values
-        T_ref = df_T.iloc[:, 1:].values
-        u_ref_data = df_u.iloc[:, 1:].values   # assumed Pa, matching the case3 CSV convention
+        r_ref = df_T.columns.astype(float).values
+        t_days = df_T.index.astype(float).values
+        T_ref = df_T.to_numpy(dtype=float)
+        u_ref_data = df_u.to_numpy(dtype=float)   # Pa
 
         xi_grid = torch.tensor(r_ref / Rs, dtype=torch.float32)
         tau_grid = torch.tensor((t_days * 86400.0) / t_E, dtype=torch.float32)
@@ -401,11 +413,22 @@ for case_name, k_perm, Ks in CASES:
 
         print(f'{case_name}: Temperature relL2={err_L2_T*100:.2f}%  Pressure relL2={err_L2_u*100:.2f}%')
 
+        # Canonical nondimensional metrics (same T*/u* definition as the rest of the
+        # project's reported numbers) -- physical relL2_T above is not directly
+        # comparable across runs since it's diluted by the T_s=12C ambient offset.
+        canonical = physical_error_metrics(T_pred, T_ref, u_pred, u_ref_data)
+        print(
+            f'{case_name}: [canonical T*/u*] '
+            f'T_rel_l2={canonical["T_rel_l2"]*100:.2f}% T_nrmse={canonical["T_nrmse"]*100:.2f}%  '
+            f'u_rel_l2={canonical["u_rel_l2"]*100:.2f}% u_nrmse={canonical["u_nrmse"]*100:.2f}%'
+        )
+
         stats_T, text_T, (idxT_p, idxT_r) = summarize_max(T_pred, T_ref, r_ref, t_days, label='T', unit='degC')
         stats_u, text_u, (idxu_p, idxu_r) = summarize_max(u_pred, u_ref_data, r_ref, t_days, label='u', unit='Pa')
 
         summary.append({'case': case_name, 'k': k_perm, 'Ks': Ks,
                         'T_relL2_pct': err_L2_T * 100, 'u_relL2_pct': err_L2_u * 100,
+                        **{f'canonical_{k}': v for k, v in canonical.items()},
                         **stats_T, **stats_u})
 
         tag = f'{case_name}_k{k_perm:.0e}_K{Ks:.0e}'
@@ -467,8 +490,8 @@ for case_name, k_perm, Ks in CASES:
             savepath=os.path.join(OUTPUT_DIR, f'{tag}_pressure_daily_lines.png'),
         )
 
-    except FileNotFoundError:
-        print(f'[Note] Reference CSVs not found for {case_name} at {path_u_csv} -- skipping evaluation/plots.')
+    except FileNotFoundError as ex:
+        print(f'[Note] Reference data not found for {case_name} ({ex}) -- skipping evaluation/plots.')
         summary.append({'case': case_name, 'k': k_perm, 'Ks': Ks, 'T_relL2_pct': None, 'u_relL2_pct': None})
 
 # =========================================================

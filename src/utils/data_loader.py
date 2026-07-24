@@ -16,12 +16,16 @@ Usage:
 import traceback
 from pathlib import Path
 from typing import Tuple
+
 import numpy as np
 import pandas as pd
-from src.utils import config as cfg
+
+from src.utils.physics_constants import PhysicsConstants
+
 SECONDS_PER_DAY = 24.0 * 60.0 * 60.0
 
-PHYS_CONST = cfg.PhysicsConstants()
+PHYS_CONST = PhysicsConstants()
+
 
 def load_single_case(
     case_num: int,
@@ -97,32 +101,24 @@ def load_all_cases() -> dict[int, dict[str, pd.DataFrame]] | dict[str, str | int
         }
 
 
-def prepare_training_data(case_num: int) -> Tuple[np.ndarray, np.ndarray] | dict[str, str | int]:
+def prepare_training_data(
+    case_num: int,
+) -> Tuple[np.ndarray, np.ndarray] | dict[str, str | int]:
     """
     Build a nondimensional (r*, t*) -> (T*, u*) dataset from FDM data.
 
     Applies the same nondimensionalization used by the PINN model
-    (r* = r/R_s, t* = t/t_c, T* = (T-T_s)/delta_T, u* = u/u_c), so the
-    returned arrays live in the same coordinate system as the network's
-    inputs/outputs. The defaults match the values used elsewhere in the
-    project; pass explicit values to stay in sync if those change, and
-    make sure t_c/u_c match whatever was used to compute C1/C2/C3 for
-    this case.
+    (r* = r/R_s, t* = t/t_c, T* = (T-T_s)/delta_T, u* = u/u_c), using
+    the module-level `PHYS_CONST` instance, so the returned arrays live
+    in the same coordinate system as the network's inputs/outputs.
+    Whatever computes C1/C2/C3 for a case must use this same instance's
+    `t_c`/`u_c` (see `PhysicsConstants.calculate_physics_constants`) to
+    stay consistent.
 
     Parameters
     ----------
     case_num : int
         Case number (1-5).
-    R_s : float
-        Far-field radius (m), used to nondimensionalize r.
-    T_s : float
-        Reference (far-field/initial) temperature (C).
-    delta_T : float
-        Tf - Ts (C), used to nondimensionalize T.
-    t_c : float
-        Characteristic time scale (s).
-    u_c : float
-        Characteristic pressure scale (Pa).
 
     Returns
     -------
@@ -205,9 +201,9 @@ if __name__ == "__main__":
         print(y[:5000])
 
     print("\nTemperature")
-    print(f"min: {y[:,0].min()}")
-    print(f"max: {y[:,0].max()}")
+    print(f"min: {y[:, 0].min()}")
+    print(f"max: {y[:, 0].max()}")
 
     print("\nPressure")
-    print(f"min: {y[:,1].min()}")
-    print(f"max: {y[:,1].max()}")
+    print(f"min: {y[:, 1].min()}")
+    print(f"max: {y[:, 1].max()}")

@@ -1,3 +1,4 @@
+# train_3_inverse_k_xiaohan_xie.py
 import os
 import time
 from scipy.stats.qmc import LatinHypercube
@@ -172,7 +173,7 @@ def run_inversion(lambda_data, log10_k_init, epochs, tag, clamp=(-13.0, -6.0)):
 
     opt = torch.optim.Adam([
         {'params': model.net.parameters(), 'lr': 2e-3},
-        {'params': [model.log10_k], 'lr': 2e-2},
+        {'params': [model.log10_k], 'lr': 2e-3},
     ])
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.7, patience=300)
 
@@ -225,9 +226,11 @@ def run_inversion(lambda_data, log10_k_init, epochs, tag, clamp=(-13.0, -6.0)):
 print(f'\nTrue k for case3 = {K_TRUE:.2e}\n')
 
 results = []
-results.append(run_inversion(lambda_data=50.0,  log10_k_init=-10.0, epochs=4000, tag='lam=50'))
-results.append(run_inversion(lambda_data=200.0, log10_k_init=-10.0, epochs=4000, tag='lam=200'))
-results.append(run_inversion(lambda_data=1000.0, log10_k_init=-10.0, epochs=4000, tag='lam=1000'))
+results.append(run_inversion(lambda_data=10.0, log10_k_init=-8.0, epochs=5000, tag='lam=10'))
+results.append(run_inversion(lambda_data=50.0,  log10_k_init=-8.0, epochs=5000, tag='lam=50'))
+results.append(run_inversion(lambda_data=200.0, log10_k_init=-8.0, epochs=5000, tag='lam=200'))
+results.append(run_inversion(lambda_data=1000.0, log10_k_init=-8.0, epochs=5000, tag='lam=1000'))
+
 
 fig, axes = plt.subplots(1, 2, figsize=(13, 5))
 for r in results:

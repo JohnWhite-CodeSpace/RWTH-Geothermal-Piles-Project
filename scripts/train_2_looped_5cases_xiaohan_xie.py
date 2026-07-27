@@ -1,3 +1,4 @@
+# train_2_looped_5cases_xiaohan_xie.py
 import os
 import time
 from scipy.stats.qmc import LatinHypercube
@@ -58,7 +59,7 @@ print(f'xi_R     = {xi_R:.5f} | alpha_n = {alpha_n:.5e}')
 # =========================================================
 
 BASE_DIR = '/Users/seanxie/Desktop/RWTH PINN/Geothermal Piles Updated'
-OUTPUT_DIR = os.path.join(BASE_DIR, 'pinn_task2_results_5cases_5layers_64_weights_10x_pde_1x_ic_bc')  # weights: 100x PDE, 1x IC, 1x BC
+OUTPUT_DIR = os.path.join(BASE_DIR, 'pinn_task2_results_5cases_5layers_64_weights_10x_pde_1x_ic_bc')  # weights: 10x PDE, 1x IC, 1x BC
 
 
 CASES = [
@@ -68,6 +69,10 @@ CASES = [
     ('case4', 1e-11, 2e6),
     ('case5', 1e-12, 2e6),
 ]
+# CASES = [
+#     ('case5', 1e-12, 2e6),
+# ]
+
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 

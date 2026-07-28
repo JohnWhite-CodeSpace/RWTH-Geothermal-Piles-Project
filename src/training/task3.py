@@ -11,11 +11,12 @@ import matplotlib.pyplot as plt
 torch.set_default_dtype(torch.float64)
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.utils.config import PhysicsConstants
 from src.utils.sampler import GeothermalSampler
 from src.utils.data_loader import load_single_case
-from pinn import GeothermalPINN, GeothermalInversePINN
+from models.pinn2 import GeothermalPINN, GeothermalInversePINN
 
 
 def build_network(input_dim: int = 2, output_dim: int = 1) -> nn.Module:
